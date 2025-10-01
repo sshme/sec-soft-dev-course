@@ -1,7 +1,23 @@
-from fastapi import FastAPI, HTTPException, Request
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="SecDev Course App", version="0.1.0")
+from app.markdown_builder import HighlightsMarkdownExporter
+from app.models import (
+    Highlight,
+    HighlightCreate,
+    HighlightListResponse,
+    HighlightResponse,
+    HighlightUpdate,
+)
+from app.storage import storage
+
+app = FastAPI(
+    title="Reading Highlights API",
+    version="1.0.0",
+    description="API for managing reading highlights and quotes",
+)
 
 
 class ApiError(Exception):
@@ -21,7 +37,6 @@ async def api_error_handler(request: Request, exc: ApiError):
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    # Normalize FastAPI HTTPException into our error envelope
     detail = exc.detail if isinstance(exc.detail, str) else "http_error"
     return JSONResponse(
         status_code=exc.status_code,
@@ -34,24 +49,105 @@ def health():
     return {"status": "ok"}
 
 
-# Example minimal entity (for tests/demo)
-_DB = {"items": []}
+@app.post("/highlights", response_model=HighlightResponse, status_code=201)
+def create_highlight(highlight_data: HighlightCreate):
+    new_highlight = storage.create(
+        text=highlight_data.text, source=highlight_data.source, tags=highlight_data.tags
+    )
+
+    return HighlightResponse(
+        highlight=Highlight(**new_highlight), message="Highlight created successfully"
+    )
 
 
-@app.post("/items")
-def create_item(name: str):
-    if not name or len(name) > 100:
+@app.get("/highlights", response_model=HighlightListResponse)
+def get_highlights(tag: Optional[str] = Query(None, description="Filter by tag")):
+    if tag:
+        highlights = storage.get_by_tag(tag)
+    else:
+        highlights = storage.get_all()
+
+    highlights.sort(key=lambda x: x["created_at"], reverse=True)
+
+    return HighlightListResponse(
+        highlights=[Highlight(**h) for h in highlights],
+        total=len(highlights),
+        message="Highlights retrieved successfully",
+    )
+
+
+@app.get("/highlights/{highlight_id}", response_model=HighlightResponse)
+def get_highlight(highlight_id: int):
+    highlight = storage.get_by_id(highlight_id)
+
+    if not highlight:
         raise ApiError(
-            code="validation_error", message="name must be 1..100 chars", status=422
+            code="not_found",
+            message=f"Highlight with ID {highlight_id} not found",
+            status=404,
         )
-    item = {"id": len(_DB["items"]) + 1, "name": name}
-    _DB["items"].append(item)
-    return item
+
+    return HighlightResponse(
+        highlight=Highlight(**highlight), message="Highlight retrieved successfully"
+    )
 
 
-@app.get("/items/{item_id}")
-def get_item(item_id: int):
-    for it in _DB["items"]:
-        if it["id"] == item_id:
-            return it
-    raise ApiError(code="not_found", message="item not found", status=404)
+@app.put("/highlights/{highlight_id}", response_model=HighlightResponse)
+def update_highlight(highlight_id: int, highlight_data: HighlightUpdate):
+    update_data = highlight_data.model_dump(exclude_unset=True)
+
+    updated_highlight = storage.update(highlight_id, update_data)
+
+    if not updated_highlight:
+        raise ApiError(
+            code="not_found",
+            message=f"Highlight with ID {highlight_id} not found",
+            status=404,
+        )
+
+    return HighlightResponse(
+        highlight=Highlight(**updated_highlight),
+        message="Highlight updated successfully",
+    )
+
+
+@app.delete("/highlights/{highlight_id}")
+def delete_highlight(highlight_id: int):
+    deleted_highlight = storage.delete(highlight_id)
+
+    if not deleted_highlight:
+        raise ApiError(
+            code="not_found",
+            message=f"Highlight with ID {highlight_id} not found",
+            status=404,
+        )
+
+    return {
+        "message": "Highlight deleted successfully",
+        "deleted_id": highlight_id,
+        "deleted_text": (
+            deleted_highlight["text"][:50] + "..."
+            if len(deleted_highlight["text"]) > 50
+            else deleted_highlight["text"]
+        ),
+    }
+
+
+@app.get("/highlights/export/markdown")
+def export_highlights_markdown(
+    tag: Optional[str] = Query(None, description="Filter by tag")
+):
+    if tag:
+        highlights = storage.get_by_tag(tag)
+    else:
+        highlights = storage.get_all()
+
+    markdown_content, total = HighlightsMarkdownExporter.export(
+        highlights, filter_tag=tag
+    )
+
+    return {
+        "message": "Markdown export generated successfully",
+        "content": markdown_content,
+        "total_highlights": total,
+    }
