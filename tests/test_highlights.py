@@ -17,7 +17,7 @@ def test_get_all_highlights():
     data = response.json()
     assert "highlights" in data
     assert "total" in data
-    assert data["total"] >= 2  # We have 2 hardcoded highlights
+    assert data["total"] >= 2
 
 
 def test_get_highlight_by_id():
@@ -33,8 +33,10 @@ def test_get_nonexistent_highlight():
     response = client.get("/highlights/999")
     assert response.status_code == 404
     data = response.json()
-    assert "error" in data
-    assert data["error"]["code"] == "not_found"
+    assert "type" in data
+    assert "status" in data
+    assert data["status"] == 404
+    assert "correlation_id" in data
 
 
 def test_create_highlight():
@@ -54,32 +56,32 @@ def test_create_highlight():
 
 def test_create_highlight_validation_error():
     invalid_highlight = {
-        "text": "",  # Empty text should fail validation
+        "text": "",
         "source": "Test Source",
         "tags": [],
     }
     response = client.post("/highlights", json=invalid_highlight)
-    assert response.status_code == 422  # Validation error
+    assert response.status_code == 422
 
 
 def test_create_highlight_with_long_text():
     invalid_highlight = {
-        "text": "x" * 2001,  # Exceeds 2000 character limit
+        "text": "x" * 2001,
         "source": "Test Source",
         "tags": [],
     }
     response = client.post("/highlights", json=invalid_highlight)
-    assert response.status_code == 422  # Validation error
+    assert response.status_code == 422
 
 
 def test_create_highlight_too_many_tags():
     invalid_highlight = {
         "text": "Valid text",
         "source": "Test Source",
-        "tags": [f"tag{i}" for i in range(11)],  # 11 tags, limit is 10
+        "tags": [f"tag{i}" for i in range(11)],
     }
     response = client.post("/highlights", json=invalid_highlight)
-    assert response.status_code == 422  # Validation error
+    assert response.status_code == 422
 
 
 def test_update_highlight():
@@ -99,9 +101,7 @@ def test_update_partial_highlight():
     response = client.put("/highlights/2", json=update_data)
     assert response.status_code == 200
     data = response.json()
-    # Text and source should remain unchanged
     assert "Einstein" in data["highlight"]["source"]
-    # Tags should be updated
     assert set(data["highlight"]["tags"]) == set(update_data["tags"])
 
 
@@ -140,7 +140,6 @@ def test_filter_highlights_by_tag():
     assert response.status_code == 200
     data = response.json()
     assert len(data["highlights"]) >= 1
-    # Check that all returned highlights contain the tag
     for highlight in data["highlights"]:
         assert "motivation" in highlight["tags"]
 

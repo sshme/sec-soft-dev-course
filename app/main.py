@@ -1,8 +1,9 @@
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
+from app.errors import problem
 from app.markdown_builder import HighlightsMarkdownExporter
 from app.models import (
     Highlight,
@@ -29,18 +30,51 @@ class ApiError(Exception):
 
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError):
-    return JSONResponse(
-        status_code=exc.status,
-        content={"error": {"code": exc.code, "message": exc.message}},
+    return problem(
+        status=exc.status,
+        title=exc.code.replace("_", " ").title(),
+        detail=exc.message,
+        type_=f"/errors/{exc.code.replace('_', '-')}",
+        instance=str(request.url),
     )
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    detail = exc.detail if isinstance(exc.detail, str) else "http_error"
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": {"code": "http_error", "message": detail}},
+    detail = exc.detail if isinstance(exc.detail, str) else "HTTP error occurred"
+    return problem(
+        status=exc.status_code,
+        title="HTTP Error",
+        detail=detail,
+        type_="/errors/http-error",
+        instance=str(request.url),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    # Convert errors to JSON-serializable format
+    serializable_errors = []
+    for error in errors:
+        error_dict = {
+            "loc": error.get("loc", []),
+            "msg": error.get("msg", ""),
+            "type": error.get("type", ""),
+        }
+        # Add input if it's serializable
+        if "input" in error:
+            error_dict["input"] = error["input"]
+        serializable_errors.append(error_dict)
+
+    detail = f"Validation failed: {len(errors)} error(s)"
+    return problem(
+        status=422,
+        title="Validation Error",
+        detail=detail,
+        type_="/errors/validation",
+        instance=str(request.url),
+        extras={"validation_errors": serializable_errors},
     )
 
 
