@@ -54,7 +54,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     errors = exc.errors()
-    # Convert errors to JSON-serializable format
     serializable_errors = []
     for error in errors:
         error_dict = {
@@ -62,7 +61,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "msg": error.get("msg", ""),
             "type": error.get("type", ""),
         }
-        # Add input if it's serializable
         if "input" in error:
             error_dict["input"] = error["input"]
         serializable_errors.append(error_dict)
