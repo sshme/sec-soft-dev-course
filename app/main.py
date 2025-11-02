@@ -1,10 +1,12 @@
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 
+from app.auth import router as auth_router
 from app.errors import problem
 from app.markdown_builder import HighlightsMarkdownExporter
+from app.middleware import CorrelationIdMiddleware
 from app.models import (
     Highlight,
     HighlightCreate,
@@ -12,6 +14,8 @@ from app.models import (
     HighlightResponse,
     HighlightUpdate,
 )
+from app.rate_limiter import get_client_ip, rate_limit
+from app.security.authorization import AuthUser, require_auth, require_owner
 from app.storage import storage
 
 app = FastAPI(
@@ -19,6 +23,9 @@ app = FastAPI(
     version="1.0.0",
     description="API for managing reading highlights and quotes",
 )
+
+app.add_middleware(CorrelationIdMiddleware)
+app.include_router(auth_router)
 
 
 class ApiError(Exception):
@@ -82,9 +89,18 @@ def health():
 
 
 @app.post("/highlights", response_model=HighlightResponse, status_code=201)
-def create_highlight(highlight_data: HighlightCreate):
+async def create_highlight(
+    request: Request,
+    highlight_data: HighlightCreate,
+    user: AuthUser = Depends(require_auth),
+):
+    await rate_limit(request, get_client_ip(request), max_requests=10, window_minutes=1)
+
     new_highlight = storage.create(
-        text=highlight_data.text, source=highlight_data.source, tags=highlight_data.tags
+        text=highlight_data.text,
+        source=highlight_data.source,
+        tags=highlight_data.tags,
+        owner_id=user.sub,
     )
 
     return HighlightResponse(
@@ -93,11 +109,14 @@ def create_highlight(highlight_data: HighlightCreate):
 
 
 @app.get("/highlights", response_model=HighlightListResponse)
-def get_highlights(tag: Optional[str] = Query(None, description="Filter by tag")):
+def get_highlights(
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    user: AuthUser = Depends(require_auth),
+):
     if tag:
-        highlights = storage.get_by_tag(tag)
+        highlights = storage.get_by_tag(tag, owner_id=user.sub)
     else:
-        highlights = storage.get_all()
+        highlights = storage.get_all(owner_id=user.sub)
 
     highlights.sort(key=lambda x: x["created_at"], reverse=True)
 
@@ -109,8 +128,11 @@ def get_highlights(tag: Optional[str] = Query(None, description="Filter by tag")
 
 
 @app.get("/highlights/{highlight_id}", response_model=HighlightResponse)
-def get_highlight(highlight_id: int):
-    highlight = storage.get_by_id(highlight_id)
+def get_highlight(highlight_id: int, user: AuthUser = Depends(require_auth)):
+    if user.is_admin():
+        highlight = storage.get_by_id(highlight_id)
+    else:
+        highlight = storage.get_by_id(highlight_id, owner_id=user.sub)
 
     if not highlight:
         raise ApiError(
@@ -119,16 +141,23 @@ def get_highlight(highlight_id: int):
             status=404,
         )
 
+    if not user.is_admin():
+        require_owner(highlight["owner_id"], user)
+
     return HighlightResponse(
         highlight=Highlight(**highlight), message="Highlight retrieved successfully"
     )
 
 
 @app.put("/highlights/{highlight_id}", response_model=HighlightResponse)
-def update_highlight(highlight_id: int, highlight_data: HighlightUpdate):
+def update_highlight(
+    highlight_id: int,
+    highlight_data: HighlightUpdate,
+    user: AuthUser = Depends(require_auth),
+):
     update_data = highlight_data.model_dump(exclude_unset=True)
 
-    updated_highlight = storage.update(highlight_id, update_data)
+    updated_highlight = storage.update(highlight_id, update_data, owner_id=user.sub)
 
     if not updated_highlight:
         raise ApiError(
@@ -144,8 +173,8 @@ def update_highlight(highlight_id: int, highlight_data: HighlightUpdate):
 
 
 @app.delete("/highlights/{highlight_id}")
-def delete_highlight(highlight_id: int):
-    deleted_highlight = storage.delete(highlight_id)
+def delete_highlight(highlight_id: int, user: AuthUser = Depends(require_auth)):
+    deleted_highlight = storage.delete(highlight_id, owner_id=user.sub)
 
     if not deleted_highlight:
         raise ApiError(
@@ -167,12 +196,13 @@ def delete_highlight(highlight_id: int):
 
 @app.get("/highlights/export/markdown")
 def export_highlights_markdown(
-    tag: Optional[str] = Query(None, description="Filter by tag")
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    user: AuthUser = Depends(require_auth),
 ):
     if tag:
-        highlights = storage.get_by_tag(tag)
+        highlights = storage.get_by_tag(tag, owner_id=user.sub)
     else:
-        highlights = storage.get_all()
+        highlights = storage.get_all(owner_id=user.sub)
 
     markdown_content, total = HighlightsMarkdownExporter.export(
         highlights, filter_tag=tag

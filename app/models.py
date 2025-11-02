@@ -5,8 +5,6 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class HighlightCreate(BaseModel):
-    """Model for creating a new highlight"""
-
     text: str = Field(
         ..., min_length=1, max_length=2000, description="The highlighted text/quote"
     )
@@ -29,8 +27,6 @@ class HighlightCreate(BaseModel):
 
 
 class HighlightUpdate(BaseModel):
-    """Model for updating an existing highlight"""
-
     text: Optional[str] = Field(None, min_length=1, max_length=2000)
     source: Optional[str] = Field(None, min_length=1, max_length=500)
     tags: Optional[List[str]] = Field(None)
@@ -46,12 +42,11 @@ class HighlightUpdate(BaseModel):
 
 
 class Highlight(BaseModel):
-    """Model representing a complete highlight"""
-
     id: int
     text: str
     source: str
     tags: List[str]
+    owner_id: str
     created_at: datetime
     updated_at: datetime
 

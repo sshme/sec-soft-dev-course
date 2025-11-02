@@ -76,25 +76,28 @@ def test_config_debug_mode():
 
 
 def test_config_environment_setting():
-    """Test environment setting"""
     os.environ["ENVIRONMENT"] = "production"
+    os.environ["SECRET_KEY"] = "test-prod-key"
     config = Config()
     assert config.environment == "production"
 
     if "ENVIRONMENT" in os.environ:
         del os.environ["ENVIRONMENT"]
+    if "SECRET_KEY" in os.environ:
+        del os.environ["SECRET_KEY"]
     config = Config()
     assert config.environment == "development"
 
 
 def test_validate_production_secrets_passes_without_requirements():
-    """Test production validation passes when no secrets are required"""
     os.environ["ENVIRONMENT"] = "production"
+    os.environ["SECRET_KEY"] = "test-prod-key"
     config = Config()
 
     config.validate_production_secrets()
 
     del os.environ["ENVIRONMENT"]
+    del os.environ["SECRET_KEY"]
 
 
 def test_config_does_not_log_secrets():

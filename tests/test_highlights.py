@@ -1,8 +1,30 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from app.config import config
 from app.main import app
+from app.security.jwt import clear_denylist, issue_access_token
+from app.storage import storage
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def setup():
+    original_key = config.secret_key
+    config.secret_key = "test-secret-key"
+    storage.reset_to_default()
+    clear_denylist()
+    yield
+    config.secret_key = original_key
+    storage.reset_to_default()
+    clear_denylist()
+
+
+@pytest.fixture
+def auth_headers():
+    token = issue_access_token(sub="demo-user", role="user")
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_health_check():
@@ -11,8 +33,8 @@ def test_health_check():
     assert response.json() == {"status": "ok"}
 
 
-def test_get_all_highlights():
-    response = client.get("/highlights")
+def test_get_all_highlights(auth_headers):
+    response = client.get("/highlights", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "highlights" in data
@@ -20,8 +42,8 @@ def test_get_all_highlights():
     assert data["total"] >= 2
 
 
-def test_get_highlight_by_id():
-    response = client.get("/highlights/1")
+def test_get_highlight_by_id(auth_headers):
+    response = client.get("/highlights/1", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "highlight" in data
@@ -29,8 +51,8 @@ def test_get_highlight_by_id():
     assert "Steve Jobs" in data["highlight"]["source"]
 
 
-def test_get_nonexistent_highlight():
-    response = client.get("/highlights/999")
+def test_get_nonexistent_highlight(auth_headers):
+    response = client.get("/highlights/999", headers=auth_headers)
     assert response.status_code == 404
     data = response.json()
     assert "type" in data
@@ -39,13 +61,13 @@ def test_get_nonexistent_highlight():
     assert "correlation_id" in data
 
 
-def test_create_highlight():
+def test_create_highlight(auth_headers):
     new_highlight = {
         "text": "Test highlight text for API testing",
         "source": "Test Source Book",
         "tags": ["test", "api", "example"],
     }
-    response = client.post("/highlights", json=new_highlight)
+    response = client.post("/highlights", json=new_highlight, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
     assert "highlight" in data
@@ -54,89 +76,91 @@ def test_create_highlight():
     assert set(data["highlight"]["tags"]) == set(new_highlight["tags"])
 
 
-def test_create_highlight_validation_error():
+def test_create_highlight_validation_error(auth_headers):
     invalid_highlight = {
         "text": "",
         "source": "Test Source",
         "tags": [],
     }
-    response = client.post("/highlights", json=invalid_highlight)
+    response = client.post("/highlights", json=invalid_highlight, headers=auth_headers)
     assert response.status_code == 422
 
 
-def test_create_highlight_with_long_text():
+def test_create_highlight_with_long_text(auth_headers):
     invalid_highlight = {
         "text": "x" * 2001,
         "source": "Test Source",
         "tags": [],
     }
-    response = client.post("/highlights", json=invalid_highlight)
+    response = client.post("/highlights", json=invalid_highlight, headers=auth_headers)
     assert response.status_code == 422
 
 
-def test_create_highlight_too_many_tags():
+def test_create_highlight_too_many_tags(auth_headers):
     invalid_highlight = {
         "text": "Valid text",
         "source": "Test Source",
         "tags": [f"tag{i}" for i in range(11)],
     }
-    response = client.post("/highlights", json=invalid_highlight)
+    response = client.post("/highlights", json=invalid_highlight, headers=auth_headers)
     assert response.status_code == 422
 
 
-def test_update_highlight():
+def test_update_highlight(auth_headers):
     update_data = {
         "text": "Updated highlight text for testing",
         "tags": ["updated", "test", "api"],
     }
-    response = client.put("/highlights/1", json=update_data)
+    response = client.put("/highlights/1", json=update_data, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["highlight"]["text"] == update_data["text"]
     assert set(data["highlight"]["tags"]) == set(update_data["tags"])
 
 
-def test_update_partial_highlight():
+def test_update_partial_highlight(auth_headers):
     update_data = {"tags": ["philosophy", "wisdom", "partial-update"]}
-    response = client.put("/highlights/2", json=update_data)
+    response = client.put("/highlights/2", json=update_data, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "Einstein" in data["highlight"]["source"]
     assert set(data["highlight"]["tags"]) == set(update_data["tags"])
 
 
-def test_update_nonexistent_highlight():
+def test_update_nonexistent_highlight(auth_headers):
     update_data = {"text": "This should fail"}
-    response = client.put("/highlights/999", json=update_data)
+    response = client.put("/highlights/999", json=update_data, headers=auth_headers)
     assert response.status_code == 404
 
 
-def test_delete_highlight():
+def test_delete_highlight(auth_headers):
     new_highlight = {
         "text": "Highlight to delete in test",
         "source": "Delete Test Source",
         "tags": ["delete", "test", "temporary"],
     }
-    create_response = client.post("/highlights", json=new_highlight)
+    create_response = client.post(
+        "/highlights", json=new_highlight, headers=auth_headers
+    )
     created_id = create_response.json()["highlight"]["id"]
 
-    response = client.delete(f"/highlights/{created_id}")
+    response = client.delete(f"/highlights/{created_id}", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "deleted_id" in data
     assert data["deleted_id"] == created_id
 
-    get_response = client.get(f"/highlights/{created_id}")
+    get_response = client.get(f"/highlights/{created_id}", headers=auth_headers)
     assert get_response.status_code == 404
 
 
-def test_delete_nonexistent_highlight():
-    response = client.delete("/highlights/999")
+def test_delete_nonexistent_highlight(auth_headers):
+    response = client.delete("/highlights/999", headers=auth_headers)
     assert response.status_code == 404
 
 
-def test_filter_highlights_by_tag():
-    response = client.get("/highlights?tag=motivation")
+def test_filter_highlights_by_tag(auth_headers):
+    response = client.get("/highlights?tag=motivation", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert len(data["highlights"]) >= 1
@@ -144,23 +168,23 @@ def test_filter_highlights_by_tag():
         assert "motivation" in highlight["tags"]
 
 
-def test_filter_highlights_by_multiple_word_tag():
-    response = client.get("/highlights?tag=steve-jobs")
+def test_filter_highlights_by_multiple_word_tag(auth_headers):
+    response = client.get("/highlights?tag=steve-jobs", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert len(data["highlights"]) >= 1
 
 
-def test_filter_highlights_by_nonexistent_tag():
-    response = client.get("/highlights?tag=nonexistent")
+def test_filter_highlights_by_nonexistent_tag(auth_headers):
+    response = client.get("/highlights?tag=nonexistent", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
     assert len(data["highlights"]) == 0
 
 
-def test_export_markdown():
-    response = client.get("/highlights/export/markdown")
+def test_export_markdown(auth_headers):
+    response = client.get("/highlights/export/markdown", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "content" in data
@@ -170,8 +194,10 @@ def test_export_markdown():
     assert "Einstein" in data["content"]
 
 
-def test_export_markdown_with_tag_filter():
-    response = client.get("/highlights/export/markdown?tag=philosophy")
+def test_export_markdown_with_tag_filter(auth_headers):
+    response = client.get(
+        "/highlights/export/markdown?tag=philosophy", headers=auth_headers
+    )
     assert response.status_code == 200
     data = response.json()
     assert "content" in data
@@ -179,8 +205,10 @@ def test_export_markdown_with_tag_filter():
     assert "Einstein" in data["content"]
 
 
-def test_export_markdown_with_nonexistent_tag():
-    response = client.get("/highlights/export/markdown?tag=nonexistent")
+def test_export_markdown_with_nonexistent_tag(auth_headers):
+    response = client.get(
+        "/highlights/export/markdown?tag=nonexistent", headers=auth_headers
+    )
     assert response.status_code == 200
     data = response.json()
     assert "content" in data
@@ -188,8 +216,8 @@ def test_export_markdown_with_nonexistent_tag():
     assert "# Reading Highlights" in data["content"]
 
 
-def test_highlights_sorting():
-    response = client.get("/highlights")
+def test_highlights_sorting(auth_headers):
+    response = client.get("/highlights", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     highlights = data["highlights"]
@@ -202,13 +230,13 @@ def test_highlights_sorting():
         assert current_date >= next_date
 
 
-def test_create_highlight_tag_normalization():
+def test_create_highlight_tag_normalization(auth_headers):
     new_highlight = {
         "text": "Testing tag normalization",
         "source": "Test Source",
         "tags": ["  UPPERCASE  ", "Mixed-Case", "normal"],
     }
-    response = client.post("/highlights", json=new_highlight)
+    response = client.post("/highlights", json=new_highlight, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
 

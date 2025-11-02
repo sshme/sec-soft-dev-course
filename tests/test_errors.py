@@ -1,13 +1,34 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from app.config import config
 from app.main import app
+from app.security.jwt import clear_denylist, issue_access_token
+from app.storage import storage
 
 client = TestClient(app)
 
 
-def test_rfc7807_contract_not_found():
-    """Test RFC 7807 error format for non-existent highlight"""
-    r = client.get("/highlights/999")
+@pytest.fixture(autouse=True)
+def setup():
+    original_key = config.secret_key
+    config.secret_key = "test-secret-key"
+    storage.reset_to_default()
+    clear_denylist()
+    yield
+    config.secret_key = original_key
+    storage.reset_to_default()
+    clear_denylist()
+
+
+@pytest.fixture
+def auth_headers():
+    token = issue_access_token(sub="demo-user", role="user")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_rfc7807_contract_not_found(auth_headers):
+    r = client.get("/highlights/999", headers=auth_headers)
     assert r.status_code == 404
     body = r.json()
 
@@ -25,14 +46,13 @@ def test_rfc7807_contract_not_found():
     assert body["correlation_id"].count("-") == 4
 
 
-def test_rfc7807_validation_error():
-    """Test RFC 7807 format for validation errors"""
+def test_rfc7807_validation_error(auth_headers):
     invalid_data = {
         "text": "",
         "source": "Valid Source",
         "tags": [],
     }
-    r = client.post("/highlights", json=invalid_data)
+    r = client.post("/highlights", json=invalid_data, headers=auth_headers)
     assert r.status_code == 422
     body = r.json()
 
@@ -43,10 +63,9 @@ def test_rfc7807_validation_error():
     assert "validation_errors" in body
 
 
-def test_rfc7807_update_not_found():
-    """Test RFC 7807 error when updating non-existent highlight"""
+def test_rfc7807_update_not_found(auth_headers):
     update_data = {"text": "Updated text"}
-    r = client.put("/highlights/999", json=update_data)
+    r = client.put("/highlights/999", json=update_data, headers=auth_headers)
     assert r.status_code == 404
     body = r.json()
 
@@ -55,9 +74,8 @@ def test_rfc7807_update_not_found():
     assert "correlation_id" in body
 
 
-def test_rfc7807_delete_not_found():
-    """Test RFC 7807 error when deleting non-existent highlight"""
-    r = client.delete("/highlights/999")
+def test_rfc7807_delete_not_found(auth_headers):
+    r = client.delete("/highlights/999", headers=auth_headers)
     assert r.status_code == 404
     body = r.json()
 
@@ -66,14 +84,13 @@ def test_rfc7807_delete_not_found():
     assert "correlation_id" in body
 
 
-def test_rfc7807_too_many_tags():
-    """Test validation error for too many tags"""
+def test_rfc7807_too_many_tags(auth_headers):
     invalid_data = {
         "text": "Valid text",
         "source": "Valid source",
         "tags": [f"tag{i}" for i in range(15)],
     }
-    r = client.post("/highlights", json=invalid_data)
+    r = client.post("/highlights", json=invalid_data, headers=auth_headers)
     assert r.status_code == 422
     body = r.json()
 

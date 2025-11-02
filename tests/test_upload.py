@@ -34,35 +34,47 @@ def test_sniff_image_type_too_short():
     assert mime is None
 
 
-def test_secure_save_rejects_large_file(tmp_path: Path):
-    """Test rejection of files exceeding size limit"""
+def test_secure_save_rejects_large_file(tmp_path: Path, monkeypatch):
     large_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 5_000_001
-    ok, reason = secure_save(str(tmp_path), "test.png", large_data)
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok, reason = secure_save(large_data, use_s3=False)
 
     assert not ok
     assert reason == "file_too_large"
 
 
-def test_secure_save_rejects_invalid_type(tmp_path: Path):
-    """Test rejection of non-image files"""
+def test_secure_save_rejects_invalid_type(tmp_path: Path, monkeypatch):
     text_data = b"This is a text file, not an image"
-    ok, reason = secure_save(str(tmp_path), "test.txt", text_data)
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok, reason = secure_save(text_data, use_s3=False)
 
     assert not ok
     assert reason == "invalid_file_type"
 
 
-def test_secure_save_rejects_wrong_extension(tmp_path: Path):
-    """Test magic bytes validation ignores filename extension"""
-    ok, path = secure_save(str(tmp_path), "fake.jpg", VALID_PNG)
+def test_secure_save_rejects_wrong_extension(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok, path = secure_save(VALID_PNG, use_s3=False)
 
     assert ok
     assert path.endswith(".png")
 
 
-def test_secure_save_uses_uuid_naming(tmp_path: Path):
-    """Test that uploaded files get UUID-based names"""
-    ok, path = secure_save(str(tmp_path), "original_name.png", VALID_PNG)
+def test_secure_save_uses_uuid_naming(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok, path = secure_save(VALID_PNG, use_s3=False)
 
     assert ok
     filename = Path(path).name
@@ -72,9 +84,12 @@ def test_secure_save_uses_uuid_naming(tmp_path: Path):
     assert name_without_ext.count("-") == 4
 
 
-def test_secure_save_prevents_path_traversal(tmp_path: Path):
-    """Test prevention of path traversal attacks"""
-    ok, path = secure_save(str(tmp_path), "../../etc/passwd", VALID_PNG)
+def test_secure_save_prevents_path_traversal(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok, path = secure_save(VALID_PNG, use_s3=False)
 
     assert ok
     assert str(tmp_path) in path
@@ -82,9 +97,12 @@ def test_secure_save_prevents_path_traversal(tmp_path: Path):
     assert saved_file.parent == tmp_path
 
 
-def test_secure_save_valid_png(tmp_path: Path):
-    """Test successful save of valid PNG file"""
-    ok, path = secure_save(str(tmp_path), "image.png", VALID_PNG)
+def test_secure_save_valid_png(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok, path = secure_save(VALID_PNG, use_s3=False)
 
     assert ok
     assert Path(path).exists()
@@ -94,9 +112,12 @@ def test_secure_save_valid_png(tmp_path: Path):
         assert f.read() == VALID_PNG
 
 
-def test_secure_save_valid_jpeg(tmp_path: Path):
-    """Test successful save of valid JPEG file"""
-    ok, path = secure_save(str(tmp_path), "image.jpg", VALID_JPEG)
+def test_secure_save_valid_jpeg(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok, path = secure_save(VALID_JPEG, use_s3=False)
 
     assert ok
     assert Path(path).exists()
@@ -106,12 +127,15 @@ def test_secure_save_valid_jpeg(tmp_path: Path):
         assert f.read() == VALID_JPEG
 
 
-def test_secure_save_invalid_base_directory():
-    """Test handling of non-existent base directory"""
-    ok, reason = secure_save("/nonexistent/directory", "test.png", VALID_PNG)
+def test_secure_save_invalid_base_directory(monkeypatch):
+    monkeypatch.setenv("TMP_DIR", "/nonexistent/directory")
+    from app.config import config
+
+    config.tmp_dir = "/nonexistent/directory"
+    ok, reason = secure_save(VALID_PNG, use_s3=False)
 
     assert not ok
-    assert reason == "invalid_base_directory"
+    assert reason == "invalid_tmp_directory"
 
 
 def test_secure_save_spoofed_jpeg():
@@ -121,10 +145,13 @@ def test_secure_save_spoofed_jpeg():
     assert mime is None
 
 
-def test_secure_save_multiple_files_unique_names(tmp_path: Path):
-    """Test that multiple uploads get unique UUID names"""
-    ok1, path1 = secure_save(str(tmp_path), "file.png", VALID_PNG)
-    ok2, path2 = secure_save(str(tmp_path), "file.png", VALID_PNG)
+def test_secure_save_multiple_files_unique_names(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TMP_DIR", str(tmp_path))
+    from app.config import config
+
+    config.tmp_dir = str(tmp_path)
+    ok1, path1 = secure_save(VALID_PNG, use_s3=False)
+    ok2, path2 = secure_save(VALID_PNG, use_s3=False)
 
     assert ok1 and ok2
     assert path1 != path2

@@ -1,9 +1,9 @@
-"""RFC 7807 Problem Details for HTTP APIs error handling."""
-
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from starlette.responses import JSONResponse
+
+from app.middleware import get_correlation_id
 
 
 def problem(
@@ -14,7 +14,7 @@ def problem(
     instance: Optional[str] = None,
     extras: Optional[Dict[str, Any]] = None,
 ) -> JSONResponse:
-    correlation_id = str(uuid4())
+    correlation_id = get_correlation_id() or str(uuid4())
     payload = {
         "type": type_,
         "title": title,
