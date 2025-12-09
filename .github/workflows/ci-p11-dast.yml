@@ -3,7 +3,7 @@ name: Security - DAST (ZAP)
 on:
   workflow_dispatch:
   push:
-    branches: [main, dev]
+    branches: [main, dev, p11-dast-zap]
     paths:
       - 'app/**/*.py'
       - '.github/workflows/ci-p11-dast.yml'
