@@ -44,6 +44,8 @@ jobs:
 
       - name: ZAP Baseline Scan
         run: |
+          touch zap_baseline.html zap_baseline.json
+          chmod 666 zap_baseline.html zap_baseline.json
           docker run --rm --network host -v $PWD:/zap/wrk zaproxy/zap-stable \
             zap-baseline.py \
               -t http://localhost:8080 \
