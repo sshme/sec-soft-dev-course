@@ -1,0 +1,41 @@
+# Vulnerability Waivers Policy
+#
+# This file defines approved exceptions for known vulnerabilities that cannot be
+# immediately fixed. Each waiver must include justification, timeline, and owner.
+#
+# Policy (from project/69_sbom-vuln-mgmt.md):
+# - Critical/High: Fix required or waiver with justification (≤ 7 days)
+# - Medium: Fix plan required (≤ 14 days)
+# - Low/Info: At discretion
+#
+# Waiver Structure:
+#   - cve: CVE identifier (e.g., CVE-2024-12345)
+#   - severity: Critical/High/Medium/Low
+#   - package: Affected package name and version
+#   - justification: Why this cannot be fixed immediately
+#   - mitigation: Compensating controls or risk reduction measures
+#   - issue: Link to tracking issue/PR
+#   - expires: Date when waiver must be reviewed (YYYY-MM-DD)
+#   - owner: Responsible person/team
+
+waivers: []
+  # Example waiver (remove or uncomment when needed):
+  # - cve: CVE-2024-XXXXX
+  #   severity: High
+  #   package: example-package==1.2.3
+  #   justification: |
+  #     No patch available yet; vendor ETA is 2 weeks.
+  #     Vulnerability requires authenticated access which is mitigated by our auth layer.
+  #   mitigation: |
+  #     - WAF rules block known exploit patterns
+  #     - Rate limiting prevents brute force
+  #     - Monitoring alerts on suspicious activity
+  #   issue: https://github.com/org/repo/issues/123
+  #   expires: 2025-12-20
+  #   owner: security-team
+
+# Notes:
+# - Keep waivers to minimum necessary duration
+# - Review and update regularly (before expiry)
+# - Remove waivers once vulnerabilities are fixed
+# - All waivers require review and approval in PR

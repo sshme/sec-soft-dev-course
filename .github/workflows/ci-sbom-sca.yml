@@ -1,0 +1,105 @@
+name: Security - SBOM & SCA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'requirements*.txt'
+      - 'app/**/*.py'
+      - 'pyproject.toml'
+      - '.github/workflows/ci-sbom-sca.yml'
+  pull_request:
+    paths:
+      - 'requirements*.txt'
+      - 'app/**/*.py'
+      - 'pyproject.toml'
+      - '.github/workflows/ci-sbom-sca.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  EVIDENCE_DIR: EVIDENCE/P09
+
+jobs:
+  sbom-sca:
+    name: SBOM & SCA
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create metadata
+        run: |
+          mkdir -p ${{ env.EVIDENCE_DIR }}
+          {
+            echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+            echo "Commit: ${{ github.sha }}"
+            echo "Workflow: ${{ github.run_id }}"
+          } > ${{ env.EVIDENCE_DIR }}/metadata.txt
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0.17.8
+        with:
+          format: cyclonedx-json
+          output-file: ${{ env.EVIDENCE_DIR }}/sbom.json
+          upload-artifact: false
+
+      - name: Scan vulnerabilities
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype sbom:${{ env.EVIDENCE_DIR }}/sbom.json -o json --file ${{ env.EVIDENCE_DIR }}/sca_report.json || true
+          grype sbom:${{ env.EVIDENCE_DIR }}/sbom.json -o table || true
+
+      - name: Generate summary
+        run: |
+          {
+            echo "# SCA Summary"
+            echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+            echo "Commit: ${{ github.sha }}"
+            echo ""
+            echo "## Vulnerabilities by Severity"
+            echo ""
+          } > ${{ env.EVIDENCE_DIR }}/sca_summary.md
+
+          if [ -f "${{ env.EVIDENCE_DIR }}/sca_report.json" ]; then
+            CRITICAL=$(jq '[.matches[]|select(.vulnerability.severity=="Critical")]|length' ${{ env.EVIDENCE_DIR }}/sca_report.json || echo 0)
+            HIGH=$(jq '[.matches[]|select(.vulnerability.severity=="High")]|length' ${{ env.EVIDENCE_DIR }}/sca_report.json || echo 0)
+            MEDIUM=$(jq '[.matches[]|select(.vulnerability.severity=="Medium")]|length' ${{ env.EVIDENCE_DIR }}/sca_report.json || echo 0)
+            LOW=$(jq '[.matches[]|select(.vulnerability.severity=="Low")]|length' ${{ env.EVIDENCE_DIR }}/sca_report.json || echo 0)
+
+            {
+              echo "| Severity | Count |"
+              echo "|----------|-------|"
+              echo "| Critical | $CRITICAL |"
+              echo "| High | $HIGH |"
+              echo "| Medium | $MEDIUM |"
+              echo "| Low | $LOW |"
+              echo ""
+              echo "## Policy"
+              echo "- Critical/High: Fix or waiver (≤7 days)"
+              echo "- Medium: Fix plan (≤14 days)"
+            } >> ${{ env.EVIDENCE_DIR }}/sca_summary.md
+
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "" >> ${{ env.EVIDENCE_DIR }}/sca_summary.md
+              echo "## Critical/High Vulnerabilities" >> ${{ env.EVIDENCE_DIR }}/sca_summary.md
+              jq -r '.matches[]|select(.vulnerability.severity=="Critical" or .vulnerability.severity=="High")|"- \(.vulnerability.id) in \(.artifact.name)@\(.artifact.version)"' ${{ env.EVIDENCE_DIR }}/sca_report.json >> ${{ env.EVIDENCE_DIR }}/sca_summary.md || true
+            fi
+          fi
+
+      - name: Display results
+        run: cat ${{ env.EVIDENCE_DIR }}/sca_summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-sca-${{ github.sha }}
+          path: ${{ env.EVIDENCE_DIR }}/*
+          retention-days: 90
