@@ -44,11 +44,12 @@ jobs:
 
       - name: ZAP Baseline Scan
         run: |
-          docker run --rm --network host -v $PWD:/zap/wrk ghcr.io/zaproxy/zaproxy:stable \
+          docker run --rm --network host -v $PWD:/zap/wrk zaproxy/zap-stable \
             zap-baseline.py \
-              -t http://localhost:8080 \
+              -t http://localhost:8000 \
               -r zap_baseline.html \
               -J zap_baseline.json \
+              -I \
               -d || true
           mv zap_baseline.* EVIDENCE/P11/ || true
 
